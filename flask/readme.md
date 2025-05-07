@@ -1,1 +1,2 @@
 这里是用于服务器/电脑的后端代码
+需要首先在faiss_train.py中根据自己的数据创建faiss索引，然后才能在api与model_function中使用
