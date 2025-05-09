@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            margin: 0;
+            height: 100vh;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: flex-end;
+            background-color: #f0f0f0;
+        }
+        .container {
+            position: relative;
+            width: 100%;
+            max-width: 500px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+        }
+        .response {
+            padding: 10px;
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+            width: 100%;
+            max-width: 500px;
+            overflow-y: auto;  /* 允许垂直滚动 */
+            max-height: calc(100vh - 150px);  /* 最大高度，留出空间给输入框和按钮 */
+            margin-bottom: 10px;
+            flex-grow: 1;  /* 使响应区域可以占据剩余的空间 */
+            display: flex;
+            flex-direction: column;
+        }
+        .message {
+            margin-bottom: 10px;
+            padding: 10px;
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+        }
+        textarea {
+            width: 100%;
+            height: 100px;
+            padding: 10px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            resize: vertical;
+        }
+        button {
+            position: absolute;
+            right: 10px;
+            bottom: 10px;
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 显示响应内容的区域，位于文本框上方 -->
+        <div class="response" id="response"></div>
+
+        <textarea placeholder="按回车输入，shift+回车换行" id="prompt"></textarea>
+        <button onclick="generateResponse()">生成</button>
+    </div>
+
+<script>
+    let conversationHistory = [];  // 用于保存对话历史
+    let isGenerating = false;  // 追踪 AI 是否在回答
+    let controller = null;  // 控制 fetch 以支持中断
+
+    document.getElementById("prompt").addEventListener("keydown", function (event) {
+        if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();  // 阻止默认换行
+            generateResponse();  // 调用发送函数
+        }
+    });
+
+    async function generateResponse() {
+        const promptInput = document.getElementById("prompt");
+        const responseDiv = document.getElementById("response");
+        const sendButton = document.querySelector("button");
+
+        if (isGenerating) {
+            stopResponse();  // 如果 AI 在回答，点击按钮时停止
+            return;
+        }
+
+        const prompt = promptInput.value.trim();
+        if (!prompt) {
+            alert("请输入内容！");
+            return;
+        }
+
+        // 开始生成：禁用输入框 & 更新按钮文本
+        isGenerating = true;
+        promptInput.disabled = true;
+        sendButton.innerText = "停止";
+
+        // 显示用户输入
+        const userMessageDiv = document.createElement('div');
+        userMessageDiv.className = 'message';
+        userMessageDiv.innerText = `用户: ${prompt}`;
+        responseDiv.appendChild(userMessageDiv);
+
+        // 保存用户输入
+        conversationHistory.push({ role: 'user', content: prompt });
+
+        // 创建 AI 回答区域
+        const aiMessageDiv = document.createElement('div');
+        aiMessageDiv.className = 'message';
+        aiMessageDiv.innerText = "AI: ";
+        responseDiv.appendChild(aiMessageDiv);
+
+        // 创建 AbortController 用于中断请求
+        controller = new AbortController();
+
+        try {
+            const response = await fetch('/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ conversation: conversationHistory }),
+                signal: controller.signal  // 绑定 signal 以支持中断
+            });
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+
+            const stream = new ReadableStream({
+                start(controller) {
+                    function push() {
+                        reader.read().then(({ done, value }) => {
+                            if (done) {
+                                controller.close();
+                                return;
+                            }
+                            const chunk = decoder.decode(value, { stream: true });
+
+                            try {
+                                const data = chunk;
+                                aiMessageDiv.innerText = `AI: ${data.split('"')[3]}`;
+
+                                if (data.done) controller.close();
+                            } catch (e) {
+                                console.error("Error parsing data:", e);
+                            }
+
+                            push();
+                        });
+                    }
+                    push();
+                }
+            });
+
+            await new Response(stream).text();
+        } catch (error) {
+            if (error.name === "AbortError") {
+                aiMessageDiv.innerText += "\n(回答已停止)";
+            } else {
+                alert("请求失败：" + error);
+            }
+        }
+
+        resetUI();  // 结束后恢复 UI
+    }
+
+    function stopResponse() {
+        if (controller) {
+            controller.abort();  // 取消请求
+        }
+        resetUI();  // 恢复 UI
+    }
+
+    function resetUI() {
+        isGenerating = false;
+        document.getElementById("prompt").disabled = false;
+        document.getElementById("prompt").value = '';
+        document.querySelector("button").innerText = "生成";
+    }
+
+</script>
+
+
+</body>
+</html>
